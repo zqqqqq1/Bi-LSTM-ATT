@@ -15,7 +15,11 @@ class BiLSTM_ATT(nn.Module):
 		self.pos_size = config.pos_size
 		self.pos_dim = config.pos_dim
 		self.pre_train = config.pre_train
-		self.word_embeds = nn.Embedding.from_pretrained(torch.FloatTensor(config.embedding_pre),freeze=False)
+		self.file_type = config.file_type
+		if self.file_type=='eng':
+			self.word_embeds = nn.Embedding(self.embedding_size,self.embedding_dim)
+		else:
+			self.word_embeds = nn.Embedding.from_pretrained(torch.FloatTensor(config.embedding_pre),freeze=False)
 
 		# if self.pre_train:
 		# 	self.word_embeds = nn.Embedding.from_pretrained(torch.FloatTensor(config.embedding_pre),freeze=False)

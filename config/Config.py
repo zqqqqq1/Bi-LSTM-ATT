@@ -1,7 +1,8 @@
-# coding: utf-8
+# -*- coding: utf-8 -*-
 import pickle
 import numpy as np
 import codecs
+import tqdm
 import torch
 import torch.nn as nn
 import torch.functional as f
@@ -10,7 +11,7 @@ import torch.utils.data as D
 from torch.autograd import Variable
 from model.bi_lstm_att import BiLSTM_ATT
 class Config(object):
-	def __init__(self):
+	def __init__(self,file_type):
 		self.hidden_size = 200
 		self.embedding_dim = 100
 		self.max_len = 50
@@ -20,32 +21,40 @@ class Config(object):
 		self.embedding_pre = []
 		self.batch_size = 128
 		self.dropout = 0.5
-		self.file_type = 'eng'
-		self.train_file = './data/people_relation_train.pkl'
-		self.test_file = './data/people_relation_test.pkl'
-
-		# self.train_file = './data/engdata_train.pkl'
-		# self.test_file = './data/engdata_test.pkl'
-
+		self.file_type = file_type
+		#self.file_type = 'eng'
 		self.vec_file = './data/vec.txt'
+		self.max_epoches = 100
+		if self.file_type =='eng':
+			self.train_file = './data/engdata_train.pkl'
+			self.test_file = './data/engdata_test.pkl'
+			self.pos_size = 150
+			
+		else:
+			self.train_file = './data/people_relation_train.pkl'
+			self.test_file = './data/people_relation_test.pkl'
+
+		
 		self.load_train_data()
 		self.load_test_data()
-		self.load_vec_pretrain()
 		self.embedding_size = len(self.word2id)+1
+		if self.file_type =='eng':
+			self.word_embeds = nn.Embedding(self.embedding_size,self.embedding_dim)
+		else:
+			self.load_vec_pretrain()
 		self.classes_nums = len(self.relation2id)
-		self.max_epoches = 15
-		self.learning_rate = 0.01
+		self.learning_rate = 0.005
 		self.test_epoch = 1
 		self.save_epoch = 20
-		#self.init_model()
-		
-
-
+		self.pretrain_model='./checkpoint/model_eng_best.pkl'
+                #self.pretrain_model = './model/model_01.pkl'
 	def load_train_data(self):
-		with open(self.train_file,'rb')as inp:
+		if self.file_type=='eng':
 			print('loading_train_data...')
+			print('     eng   ')
+			inp = open(self.train_file,'rb')
 			# self.word2id,self.id2word,self.relation2id,self.train,self.labels,self.position1,self.position2=pickle.load(inp,encoding='bytes')
-
+			
 			self.word2id = pickle.load(inp)
 			self.id2word = pickle.load(inp)
 			self.relation2id = pickle.load(inp)
@@ -53,6 +62,18 @@ class Config(object):
 			self.labels = pickle.load(inp)
 			self.position1 = pickle.load(inp)
 			self.position2 = pickle.load(inp)
+			#self.word2id,self.id2word,self.relation2id,self.train,self.labels,self.position1,self.position2=pickle.load(inp,encoding='bytes')
+		else:
+			with open(self.train_file,'rb')as inp:
+				print('loading_train_data...')
+				print('   chinese')
+				self.word2id = pickle.load(inp)
+				self.id2word = pickle.load(inp)
+				self.relation2id = pickle.load(inp)
+				self.train = pickle.load(inp)
+				self.labels = pickle.load(inp)
+				self.position1 = pickle.load(inp)
+				self.position2 = pickle.load(inp)
 		self.train = torch.LongTensor(self.train[:len(self.train)-len(self.train)%self.batch_size])
 		self.position1 = torch.LongTensor(self.position1[:len(self.train)-len(self.train)%self.batch_size])
 		self.position2 = torch.LongTensor(self.position2[:len(self.train)-len(self.train)%self.batch_size])
@@ -99,6 +120,9 @@ class Config(object):
 	# 	return BiLSTM_ATT(self)
 	def init_model(self):
 		self.model = BiLSTM_ATT(config = self)
+		if self.pretrain_model is not None:
+			print('load pretrain_model:',self.pretrain_model)
+			self.model= torch.load(self.pretrain_model)
 		self.optimizer = self.set_optimizer()
 		self.criterion = self.set_loss()
 
@@ -136,7 +160,7 @@ class Config(object):
 		count_predict = [0]*self.classes_nums
 		count_total = [0]*self.classes_nums
 		count_right = [0]*self.classes_nums
-		for sen,pos1,pos2,label in test_dataloader:
+		for sen,pos1,pos2,label in self.test_dataloader:
 			sentence = Variable(sen)
 			pos1 = Variable(pos1)
 			pos2 = Variable(pos2)
@@ -159,8 +183,8 @@ class Config(object):
 				recall[i] = float(count_right[i])/count_total[i]
 		
 
-		precision = sum(precision)/len(relation2id)
-		recall = sum(recall)/len(relation2id)
+		precision = sum(precision)/len(self.relation2id)
+		recall = sum(recall)/len(self.relation2id)
 		f1 =  (2*precision*recall)/(precision+recall)	
 		print ("准确率：",precision)
 		print ("召回率：",recall)
@@ -181,23 +205,26 @@ class Config(object):
 			acc = 0 
 			total = 0
 			index = 0
-			for sen,pos1,pos2,tag in self.train_dataloader:
-				print('cur_batch:',index)
+			for ii,(sen,pos1,pos2,tag) in tqdm.tqdm(enumerate(self.train_dataloader),total=len(self.train_dataloader)):
+			#for sen,pos1,pos2,tag in self.train_dataloader:
+				
 				index+=1
 				cur_acc ,cur_total = self.train_one_step(sen,pos1,pos2,tag)
 				acc+=cur_acc
 				total+=cur_total
-				print('batch:',index,'train precision:',float(acc)/total*100,'%')
+			print('batch_step:',index,'train precision:',float(acc)/total*100,'%')
+			
 				
 
 			print('epoch:',epoch,'train precision:',float(acc)/total*100,'%')
 			p,r,f1 = self.test_one_step()
+			print('epoch:',epoch,'p:',p,'r:',r,'f1:',f1,'best_f1:',best_f1)
 			if f1 > best_f1:
 				best_f1 = f1
-				model_name = "./checkpoint/model_best"+".pkl"
+				model_name = "./checkpoint/"+self.file_type+"model_best"+".pkl"
 				torch.save(self.model, model_name)
 				print (model_name,"has been saved")
-		torch.save(model, "./model/model_01.pkl")
+		#torch.save(self.model, "./checkpoint/model_01.pkl")
 		print ("model has been saved")
 
 
